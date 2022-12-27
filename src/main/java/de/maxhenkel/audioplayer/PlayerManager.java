@@ -6,7 +6,6 @@ import de.maxhenkel.voicechat.api.VoicechatServerApi;
 import de.maxhenkel.voicechat.api.audiochannel.AudioChannel;
 import de.maxhenkel.voicechat.api.audiochannel.LocationalAudioChannel;
 import net.minecraft.ChatFormatting;
-import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.TextComponent;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -91,6 +90,15 @@ public class PlayerManager {
     private de.maxhenkel.voicechat.api.audiochannel.AudioPlayer playChannel(VoicechatServerApi api, AudioChannel channel, ServerLevel level, UUID sound, ServerPlayer p, int maxLengthSeconds) {
         try {
             short[] audio = AudioManager.getSound(level.getServer(), sound);
+
+            if (AudioManager.getLengthSeconds(audio) > maxLengthSeconds) {
+                if (p != null) {
+                    p.displayClientMessage(new TextComponent("Audio is too long to play").withStyle(ChatFormatting.DARK_RED), true);
+                } else {
+                    AudioPlayer.LOGGER.error("Audio {} was too long to play", sound);
+                }
+                return null;
+            }
 
             de.maxhenkel.voicechat.api.audiochannel.AudioPlayer player = api.createAudioPlayer(channel, api.createEncoder(), audio);
             player.startPlaying();

@@ -6,7 +6,6 @@ import de.maxhenkel.configbuilder.ConfigBuilder;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v1.CommandRegistrationCallback;
 import net.fabricmc.loader.api.FabricLoader;
-import net.minecraft.core.Registry;
 import net.minecraft.world.item.RecordItem;
 import net.minecraft.world.level.block.DispenserBlock;
 import org.apache.logging.log4j.LogManager;
@@ -20,7 +19,6 @@ public class AudioPlayer implements ModInitializer {
     public static final String MODID = "audioplayer";
     public static final Logger LOGGER = LogManager.getLogger(MODID);
     public static ServerConfig SERVER_CONFIG;
-
     public static AudioCache AUDIO_CACHE;
 
     @Override
@@ -34,8 +32,6 @@ public class AudioPlayer implements ModInitializer {
         } catch (IOException e) {
             LOGGER.warn("Failed to create upload folder", e);
         }
-
-        Registry.ITEM.stream().filter(item -> item instanceof RecordItem).forEach(item -> DispenserBlock.registerBehavior(item, RecordDispenseBehavior.RECORD));
 
         AUDIO_CACHE = new AudioCache(SERVER_CONFIG.cacheSize.get());
     }

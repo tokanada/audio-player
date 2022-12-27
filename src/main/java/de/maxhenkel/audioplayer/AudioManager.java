@@ -16,10 +16,12 @@ import org.apache.commons.io.IOUtils;
 
 import javax.annotation.Nullable;
 import javax.sound.sampled.UnsupportedAudioFileException;
-import javax.sound.sampled.*;
 import java.io.*;
 import java.net.URL;
-import java.nio.file.*;
+import java.nio.file.FileAlreadyExistsException;
+import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
+import java.nio.file.Path;
 import java.util.UUID;
 
 public class AudioManager {
@@ -67,19 +69,41 @@ public class AudioManager {
         }
     }
 
+    public static void saveSound(MinecraftServer server, UUID id, Path file) throws UnsupportedAudioFileException, IOException {
+        if (!Files.exists(file) || !Files.isRegularFile(file)) {
+            throw new NoSuchFileException("The file %s does not exist".formatted(file.toString()));
+        }
+
+        long size = Files.size(file);
+        if (size > AudioPlayer.SERVER_CONFIG.maxUploadSize.get()) {
+            throw new IOException("Maximum file size exceeded (%sMB>%sMB)".formatted(Math.round((float) size / 1_000_000F), Math.round(AudioPlayer.SERVER_CONFIG.maxUploadSize.get().floatValue() / 1_000_000F)));
+        }
+
+        AudioConverter.AudioType audioType = AudioConverter.getAudioType(file);
+        checkExtensionAllowed(audioType);
+
+        Path soundFile = getSoundFile(server, id, audioType.getExtension());
+        if (Files.exists(soundFile)) {
+            throw new FileAlreadyExistsException("This audio already exists");
+        }
+        Files.createDirectories(soundFile.getParent());
+
+        Files.move(file, soundFile);
+    }
+
     public static void checkExtensionAllowed(@Nullable AudioConverter.AudioType audioType) throws UnsupportedAudioFileException {
         if (audioType == null) {
             throw new UnsupportedAudioFileException("Unsupported audio format");
         }
-    }
-
-    public static byte[] convert(Path file, AudioFormat audioFormat) throws IOException, UnsupportedAudioFileException {
-        try (AudioInputStream source = AudioSystem.getAudioInputStream(file.toFile())) {
-            AudioFormat sourceFormat = source.getFormat();
-            AudioFormat convertFormat = new AudioFormat(AudioFormat.Encoding.PCM_SIGNED, sourceFormat.getSampleRate(), 16, sourceFormat.getChannels(), sourceFormat.getChannels() * 2, sourceFormat.getSampleRate(), false);
-            AudioInputStream stream1 = AudioSystem.getAudioInputStream(convertFormat, source);
-            AudioInputStream stream2 = AudioSystem.getAudioInputStream(audioFormat, stream1);
-            return stream2.readAllBytes();
+        if (audioType.equals(AudioConverter.AudioType.MP3)) {
+            if (!AudioPlayer.SERVER_CONFIG.allowMp3Upload.get()) {
+                throw new UnsupportedAudioFileException("Uploading mp3 files is not allowed on this server");
+            }
+        }
+        if (audioType.equals(AudioConverter.AudioType.WAV)) {
+            if (!AudioPlayer.SERVER_CONFIG.allowWavUpload.get()) {
+                throw new UnsupportedAudioFileException("Uploading wav files is not allowed on this server");
+            }
         }
     }
 
@@ -141,7 +165,9 @@ public class AudioManager {
         return true;
     }
 
-    private interface Stoppable {
-        void stop();
+    public static float getLengthSeconds(short[] audio) {
+        return (float) audio.length / AudioConverter.FORMAT.getSampleRate();
     }
+
+
 }
