@@ -45,6 +45,8 @@ public class AudioPlayerCommands {
                             )
                             .append(" and upload your sound as ")
                             .append(new TextComponent("wav").withStyle(ChatFormatting.GRAY))
+                            .append(" or ")
+                            .append(new TextComponent("mp3").withStyle(ChatFormatting.GRAY))
                             .append(".\n")
                             .append("Once you have uploaded the file, click ")
                             .append(new TextComponent("here")

@@ -9,6 +9,7 @@ import de.maxhenkel.voicechat.api.events.VoicechatServerStartedEvent;
 import javax.annotation.Nullable;
 
 public class Plugin implements VoicechatPlugin {
+    public static String MUSIC_DISC_CATEGORY = "music_discs";
 
     public static VoicechatApi voicechatApi;
     @Nullable

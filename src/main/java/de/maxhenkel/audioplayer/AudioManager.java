@@ -2,6 +2,7 @@ package de.maxhenkel.audioplayer;
 
 import de.maxhenkel.audioplayer.interfaces.IJukebox;
 import de.maxhenkel.voicechat.api.VoicechatServerApi;
+import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.MinecraftServer;
@@ -10,56 +11,94 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.storage.LevelResource;
+import net.minecraft.world.phys.Vec3;
 import org.apache.commons.io.IOUtils;
 
 import javax.annotation.Nullable;
+import javax.sound.sampled.UnsupportedAudioFileException;
 import javax.sound.sampled.*;
 import java.io.*;
 import java.net.URL;
-import java.nio.file.FileAlreadyExistsException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.StandardOpenOption;
+import java.nio.file.*;
 import java.util.UUID;
 
 public class AudioManager {
 
     public static LevelResource AUDIO_DATA = new LevelResource("audio_player_data");
-    public static AudioFormat FORMAT = new AudioFormat(AudioFormat.Encoding.PCM_SIGNED, 48000F, 16, 1, 2, 48000F, false);
 
-    public static short[] getSound(MinecraftServer server, UUID id) throws IOException, UnsupportedAudioFileException {
-        Path soundFile = getSoundFile(server, id);
+    public static short[] getSound(MinecraftServer server, UUID id) throws Exception {
+        return AudioPlayer.AUDIO_CACHE.get(id, () -> AudioConverter.convert(getExistingSoundFile(server, id)));
+    }
 
-        if (!Files.exists(soundFile)) {
-            throw new FileNotFoundException("Sound does not exist");
+    public static Path getSoundFile(MinecraftServer server, UUID id, String extension) {
+        return server.getWorldPath(AUDIO_DATA).resolve(id.toString() + "." + extension);
+    }
+
+    public static Path getExistingSoundFile(MinecraftServer server, UUID id) throws FileNotFoundException {
+        Path file = getSoundFile(server, id, AudioConverter.AudioType.MP3.getExtension());
+        if (Files.exists(file)) {
+            return file;
         }
-
-        return readSound(soundFile);
+        file = getSoundFile(server, id, AudioConverter.AudioType.WAV.getExtension());
+        if (Files.exists(file)) {
+            return file;
+        }
+        throw new FileNotFoundException("Audio does not exist");
     }
 
-    public static short[] readSound(Path file) throws IOException, UnsupportedAudioFileException {
-        AudioInputStream in = AudioSystem.getAudioInputStream(file.toFile());
-        AudioInputStream convertedIn = AudioSystem.getAudioInputStream(FORMAT, in);
-        return Plugin.voicechatApi.getAudioConverter().bytesToShorts(convertedIn.readAllBytes());
-    }
-
-    public static Path getSoundFile(MinecraftServer server, UUID id) {
-        return server.getWorldPath(AUDIO_DATA).resolve(id.toString() + ".wav");
+    public static Path getUploadFolder() {
+        return FabricLoader.getInstance().getGameDir().resolve("audioplayer_uploads");
     }
 
     public static void saveSound(MinecraftServer server, UUID id, String url) throws UnsupportedAudioFileException, IOException {
-        Path soundFile = getSoundFile(server, id);
+        byte[] data = download(new URL(url), AudioPlayer.SERVER_CONFIG.maxUploadSize.get());
+
+        AudioConverter.AudioType audioType = AudioConverter.getAudioType(data);
+        checkExtensionAllowed(audioType);
+
+        Path soundFile = getSoundFile(server, id, audioType.getExtension());
         if (Files.exists(soundFile)) {
             throw new FileAlreadyExistsException("This audio already exists");
         }
         Files.createDirectories(soundFile.getParent());
 
-        byte[] data = IOUtils.toByteArray(new URL(url));
-        if (data.length > AudioPlayer.SERVER_CONFIG.maxUploadSize.get()) {
-            throw new IOException("Maximum file size exceeded (%sMB>%sMB)".formatted((float) data.length / 1_000_000F, AudioPlayer.SERVER_CONFIG.maxUploadSize.get().floatValue() / 1_000_000F));
+        try (OutputStream outputStream = Files.newOutputStream(soundFile)) {
+            IOUtils.write(data, outputStream);
         }
+    }
 
-        AudioSystem.write(AudioSystem.getAudioInputStream(new ByteArrayInputStream(data)), AudioFileFormat.Type.WAVE, Files.newOutputStream(soundFile, StandardOpenOption.CREATE_NEW));
+    public static void checkExtensionAllowed(@Nullable AudioConverter.AudioType audioType) throws UnsupportedAudioFileException {
+        if (audioType == null) {
+            throw new UnsupportedAudioFileException("Unsupported audio format");
+        }
+    }
+
+    public static byte[] convert(Path file, AudioFormat audioFormat) throws IOException, UnsupportedAudioFileException {
+        try (AudioInputStream source = AudioSystem.getAudioInputStream(file.toFile())) {
+            AudioFormat sourceFormat = source.getFormat();
+            AudioFormat convertFormat = new AudioFormat(AudioFormat.Encoding.PCM_SIGNED, sourceFormat.getSampleRate(), 16, sourceFormat.getChannels(), sourceFormat.getChannels() * 2, sourceFormat.getSampleRate(), false);
+            AudioInputStream stream1 = AudioSystem.getAudioInputStream(convertFormat, source);
+            AudioInputStream stream2 = AudioSystem.getAudioInputStream(audioFormat, stream1);
+            return stream2.readAllBytes();
+        }
+    }
+
+    private static byte[] download(URL url, int limit) throws IOException {
+        ByteArrayOutputStream bos = new ByteArrayOutputStream();
+        BufferedInputStream bis = new BufferedInputStream(url.openStream());
+
+        int nRead;
+        byte[] data = new byte[32768];
+
+        while ((nRead = bis.read(data, 0, data.length)) != -1) {
+            bos.write(data, 0, nRead);
+            if (bos.size() > limit) {
+                bis.close();
+                throw new IOException("Maximum file size of %sMB exceeded".formatted((int) (((float) limit) / 1_000_000F)));
+            }
+        }
+        bis.close();
+        return bos.toByteArray();
     }
 
     @Nullable
@@ -84,7 +123,16 @@ public class AudioManager {
             return false;
         }
 
-        @Nullable UUID channelID = PlayerManager.instance().play(api, level, pos, customSound, (player instanceof ServerPlayer p) ? p : null);
+        @Nullable UUID channelID = PlayerManager.instance().playLocational(
+                api,
+                level,
+                new Vec3(pos.getX() + 0.5D, pos.getY() + 0.5D, pos.getZ() + 0.5D),
+                customSound,
+                (player instanceof ServerPlayer p) ? p : null,
+                AudioPlayer.SERVER_CONFIG.musicDiscRange.get().floatValue(),
+                Plugin.MUSIC_DISC_CATEGORY,
+                AudioPlayer.SERVER_CONFIG.maxMusicDiscDuration.get()
+        );
 
         if (level.getBlockEntity(pos) instanceof IJukebox jukebox) {
             jukebox.setChannelID(channelID);
@@ -93,4 +141,7 @@ public class AudioManager {
         return true;
     }
 
+    private interface Stoppable {
+        void stop();
+    }
 }

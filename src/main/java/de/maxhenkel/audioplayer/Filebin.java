@@ -30,8 +30,7 @@ public class Filebin {
             throw new IOException(url + " responded with status " + response.statusCode());
         }
 
-        JsonParser parser = new JsonParser();
-        JsonElement json = parser.parse(response.body());
+        JsonElement json = JsonParser.parseString(response.body());
 
         if (!(json instanceof JsonObject object)) {
             throw new IOException("Invalid response");
@@ -53,9 +52,11 @@ public class Filebin {
             }
 
             String contentType = file.get("content-type").getAsString();
+            System.out.println(contentType);
 
-            if (contentType.equals("audio/wav")) {
+            if (contentType.equals("audio/wav") || contentType.equals("audio/mpeg")) {
                 long size = file.get("bytes").getAsLong();
+                System.out.println("File type accepted");
 
                 if (size > AudioPlayer.SERVER_CONFIG.maxUploadSize.get().longValue()) {
                     throw new IOException("Maximum file size exceeded (%sMB>%sMB)".formatted((float) size / 1_000_000F, AudioPlayer.SERVER_CONFIG.maxUploadSize.get().floatValue() / 1_000_000F));
@@ -66,7 +67,7 @@ public class Filebin {
                 return;
             }
         }
-        throw new IOException("No wav files uploaded");
+        throw new IOException("No mp3 or wav files uploaded");
     }
 
     public static String getBin(UUID sound) {
